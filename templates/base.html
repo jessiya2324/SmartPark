@@ -1,0 +1,40 @@
+{% load static %}
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>
+    (() => {
+      try {
+        const savedTheme = localStorage.getItem("smartpark-theme");
+        if (savedTheme === "light" || savedTheme === "dark") document.documentElement.dataset.theme = savedTheme;
+      } catch {}
+    })();
+  </script>
+  <title>{% block title %}SmartPark — Parking, made effortless{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+  <link href="{% static 'css/app.css' %}" rel="stylesheet">
+  <link href="{% static 'css/theme.css' %}" rel="stylesheet">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark site-nav">
+ <div class="container"><a class="navbar-brand fw-bold" href="{% url 'home' %}"><span class="brand-mark"><i class="fa-solid fa-square-parking"></i></span> smartpark</a>
+ <div class="d-flex align-items-center gap-2 order-lg-2"><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to dark theme" title="Switch theme"><i class="fa-solid fa-moon" aria-hidden="true"></i><span class="visually-hidden">Switch theme</span></button>
+ <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-controls="nav" aria-expanded="false" aria-label="Toggle navigation"><span class="navbar-toggler-icon"></span></button></div>
+ <div class="collapse navbar-collapse" id="nav"><div class="navbar-nav ms-auto align-items-lg-center gap-lg-3">
+ <a class="nav-link" href="{% url 'parking:locations' %}">Find parking</a><a class="nav-link" href="{% url 'home' %}#about">About</a><a class="nav-link" href="{% url 'home' %}#features">Features</a><a class="nav-link" href="{% url 'home' %}#pricing">Pricing</a><a class="nav-link" href="{% url 'home' %}#contact">Contact</a>
+ {% if user.is_authenticated %}<a class="nav-link" href="{% url 'dashboard:home' %}">Dashboard</a><a class="nav-link" href="{% url 'accounts:profile' %}">Profile</a>
+ <form method="post" action="{% url 'accounts:logout' %}">{% csrf_token %}<button class="btn btn-outline-light btn-sm">Log out</button></form>
+ {% else %}<a class="nav-link" href="{% url 'accounts:login' %}">Log in</a><a class="btn btn-primary btn-sm px-3" href="{% url 'accounts:register' %}">Get started <i class="fa-solid fa-arrow-right ms-1"></i></a>{% endif %}
+ </div></div></div>
+</nav>
+{% if messages %}<div class="container pt-3">{% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show" role="alert">{{ message }}<button class="btn-close" data-bs-dismiss="alert"></button></div>{% endfor %}</div>{% endif %}
+<div id="smartpark-toasts" class="smartpark-toasts" aria-live="polite" aria-atomic="true"></div>
+<main>{% block content %}{% endblock %}</main>
+<footer class="footer"><div class="container d-flex flex-column flex-md-row justify-content-between gap-3"><span>© 2026 SmartPark Technologies</span><span>Find your spot. Own your time.</span></div></footer>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script><script src="{% static 'js/app.js' %}" defer></script>
+{% block scripts %}{% endblock %}
+</body></html>

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Admin dashboard · SmartPark{% endblock %}
+{% block content %}
+<section class="section-pad">
+  <div class="container">
+    <div class="d-flex justify-content-between align-items-end flex-wrap gap-3 mb-4">
+      <div>
+        <span class="eyebrow">SMARTPARK OVERVIEW</span>
+        <h1 class="h2 mb-2">Admin dashboard</h1>
+        <p class="muted mb-0">A live snapshot of parking, bookings and revenue.</p>
+      </div>
+      <a class="btn btn-primary" href="/admin/"><i class="fa-solid fa-sliders me-2"></i>Manage site</a>
+    </div>
+
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-xl-2"><div class="metric-card"><span>Parking spaces</span><strong>{{ total_slots }}</strong><i class="fa-solid fa-square-parking"></i></div></div>
+      <div class="col-6 col-xl-2"><div class="metric-card"><span>Available now</span><strong>{{ available_slots }}</strong><i class="fa-solid fa-circle-check"></i></div></div>
+      <div class="col-6 col-xl-2"><div class="metric-card"><span>Occupied now</span><strong>{{ occupied_slots }}</strong><i class="fa-solid fa-car-side"></i></div></div>
+      <div class="col-6 col-xl-2"><div class="metric-card"><span>Total bookings</span><strong>{{ bookings_count }}</strong><i class="fa-solid fa-ticket"></i></div></div>
+      <div class="col-6 col-xl-2"><div class="metric-card"><span>Customers &amp; staff</span><strong>{{ users_count }}</strong><i class="fa-solid fa-users"></i></div></div>
+      <div class="col-6 col-xl-2"><div class="metric-card"><span>Locations</span><strong>{{ locations_count }}</strong><i class="fa-solid fa-location-dot"></i></div></div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-lg-8">
+        <section class="panel h-100">
+          <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+            <div><h2 class="h5 mb-1">Revenue overview</h2><p class="muted small mb-0">Paid bookings over the last six months</p></div>
+            <div class="text-lg-end"><span class="muted small d-block">All-time revenue</span><strong class="fs-4">₹{{ revenue|floatformat:2 }}</strong></div>
+          </div>
+          <div class="chart-wrap"><canvas id="revenue-chart" role="img" aria-label="Monthly paid revenue chart"></canvas></div>
+        </section>
+      </div>
+      <div class="col-lg-4">
+        <section class="panel h-100 d-flex flex-column justify-content-between">
+          <div>
+            <span class="eyebrow">THIS MONTH</span>
+            <h2 class="h5 mt-2">Monthly revenue</h2>
+            <strong class="display-6 fw-bold">₹{{ monthly_revenue|floatformat:2 }}</strong>
+            <p class="muted mt-2">Revenue from payments marked as paid.</p>
+            <div class="occupancy-summary mt-4">
+              <div class="d-flex justify-content-between align-items-center mb-2"><span class="muted small">Current occupancy</span><strong>{{ occupancy }}%</strong></div>
+              <div class="occupancy-bar" role="progressbar" aria-label="Current parking occupancy" aria-valuenow="{{ occupancy }}" aria-valuemin="0" aria-valuemax="100"><span style="width: {{ occupancy }}%"></span></div>
+              <small class="muted d-block mt-2">{{ occupied_slots }} of {{ total_slots }} active spaces in use</small>
+            </div>
+          </div>
+          <div class="dashboard-shortcuts">
+            <a href="/admin/parking/parkinglocation/"><i class="fa-solid fa-map-location-dot"></i><span>Manage parking locations</span><i class="fa-solid fa-arrow-right ms-auto"></i></a>
+            <a href="/admin/bookings/reservation/"><i class="fa-solid fa-calendar-check"></i><span>Review bookings</span><i class="fa-solid fa-arrow-right ms-auto"></i></a>
+            <a href="/admin/accounts/user/"><i class="fa-solid fa-user-gear"></i><span>Manage users</span><i class="fa-solid fa-arrow-right ms-auto"></i></a>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</section>
+{{ revenue_labels|json_script:"revenue-labels" }}
+{{ revenue_values|json_script:"revenue-values" }}
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  (() => {
+    const canvas = document.getElementById("revenue-chart");
+    if (!canvas || !window.Chart) return;
+    const labels = JSON.parse(document.getElementById("revenue-labels").textContent);
+    const values = JSON.parse(document.getElementById("revenue-values").textContent);
+    const colors = () => {
+      const style = getComputedStyle(document.documentElement);
+      return {
+        ink: style.getPropertyValue("--muted").trim(),
+        line: style.getPropertyValue("--line").trim(),
+        blue: style.getPropertyValue("--blue").trim()
+      };
+    };
+    const palette = colors();
+    const context = canvas.getContext("2d");
+    const gradient = context.createLinearGradient(0, 0, 0, 280);
+    gradient.addColorStop(0, "rgba(71, 123, 255, .28)");
+    gradient.addColorStop(1, "rgba(71, 123, 255, 0)");
+    const chart = new Chart(context, {
+      type: "line",
+      data: {labels, datasets: [{
+        data: values,
+        borderColor: palette.blue,
+        backgroundColor: gradient,
+        fill: true,
+        tension: .38,
+        borderWidth: 3,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: palette.blue
+      }]},
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {legend: {display: false}},
+        scales: {
+          x: {grid: {display: false}, ticks: {color: palette.ink}},
+          y: {beginAtZero: true, grid: {color: palette.line}, ticks: {
+            color: palette.ink,
+            callback: value => `₹${Number(value).toLocaleString()}`
+          }}
+        }
+      }
+    });
+    window.addEventListener("smartpark:theme", () => {
+      const next = colors();
+      chart.options.scales.x.ticks.color = next.ink;
+      chart.options.scales.y.ticks.color = next.ink;
+      chart.options.scales.y.grid.color = next.line;
+      chart.data.datasets[0].borderColor = next.blue;
+      chart.data.datasets[0].pointBackgroundColor = next.blue;
+      chart.update("none");
+    });
+  })();
+</script>
+{% endblock %}

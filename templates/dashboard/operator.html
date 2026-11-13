@@ -1,0 +1,40 @@
+{% extends "base.html" %}{% block title %}Operator dashboard · SmartPark{% endblock %}
+{% block content %}
+<section class="section-pad">
+  <div class="container">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+      <div><span class="eyebrow">PARKING OPERATIONS</span><h1 class="h2 mb-0">Operator dashboard</h1></div>
+      <a href="{% url 'dashboard:operator_scan' %}" class="btn btn-primary"><i class="fa-solid fa-qrcode me-2"></i>Check a ticket</a>
+    </div>
+    <div class="row g-3 mt-2 mb-4">
+      <div class="col-6 col-md-4"><div class="metric-card"><span>Active spaces</span><strong>{{ total_slots }}</strong><i class="fa-solid fa-square-parking"></i></div></div>
+      <div class="col-6 col-md-4"><div class="metric-card"><span>Available now</span><strong>{{ available_slots }}</strong><i class="fa-solid fa-circle-check"></i></div></div>
+      <div class="col-6 col-md-4"><div class="metric-card"><span>Occupied now</span><strong>{{ occupied_slots }}</strong><i class="fa-solid fa-car-side"></i></div></div>
+    </div>
+    <div class="panel">
+      <h2 class="h5 mb-3">Today's reservations</h2>
+      <div class="table-responsive"><table class="table align-middle">
+        <thead><tr><th>Booking</th><th>Customer</th><th>Vehicle</th><th>Space</th><th>Status</th></tr></thead>
+        <tbody>{% for item in reservations %}<tr>
+          <td><span class="small">{{ item.booking_id|truncatechars:12 }}</span></td>
+          <td>{{ item.customer.get_full_name|default:item.customer.username }}</td>
+          <td>{{ item.vehicle.plate_number }}</td><td>{{ item.slot.code }}</td>
+          <td><span class="status status-{{ item.status }}">{{ item.get_status_display }}</span></td>
+        </tr>{% empty %}<tr><td colspan="5" class="text-center py-4 muted">No reservations for today.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </div>
+    <div class="panel mt-4">
+      <h2 class="h5 mb-3">Parking space availability</h2>
+      <div class="table-responsive"><table class="table align-middle">
+        <thead><tr><th>Location</th><th>Level</th><th>Space</th><th>Vehicle</th><th>Availability</th><th></th></tr></thead>
+        <tbody>{% for slot in slots %}<tr>
+          <td>{{ slot.floor.location.name }}</td><td>{{ slot.floor.name }}</td><td>{{ slot.code }}</td>
+          <td>{{ slot.get_vehicle_type_display }}</td>
+          <td>{% if not slot.is_active %}<span class="status status-cancelled">Out of service</span>{% elif slot.id in occupied_slot_ids %}<span class="status status-active">Occupied</span>{% else %}<span class="status status-confirmed">Available</span>{% endif %}</td>
+          <td><form method="post" action="{% url 'dashboard:operator_slot_update' slot.id %}">{% csrf_token %}<input type="hidden" name="is_active" value="{% if slot.is_active %}false{% else %}true{% endif %}"><button class="btn btn-sm btn-outline-primary">{% if slot.is_active %}Mark unavailable{% else %}Mark available{% endif %}</button></form></td>
+        </tr>{% empty %}<tr><td colspan="6" class="text-center py-4 muted">No parking spaces are assigned to your locations.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </div>
+  </div>
+</section>
+{% endblock %}

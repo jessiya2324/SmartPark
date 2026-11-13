@@ -1,0 +1,247 @@
+{% extends "base.html" %}{% block title %}Secure payment · SmartPark{% endblock %}
+{% block content %}<section class="auth-wrap"><div class="auth-card" data-customer-name="{{ reservation.customer.get_full_name|default:reservation.customer.username }}" data-customer-email="{{ reservation.customer.email }}" data-customer-phone="{{ reservation.customer.phone }}"><span class="eyebrow">SECURE CHECKOUT</span><h1>Confirm your spot.</h1><p class="muted">{{ reservation.slot.floor.location.name }} · {{ reservation.slot.code }}</p><div class="payment-total"><span>Total to pay</span><strong>₹{{ reservation.quoted_amount }}</strong></div>
+{% if payment_error %}<div class="alert alert-warning" role="alert">{{ payment_error }}</div>{% endif %}
+<div id="payment-message" class="alert d-none" role="status" aria-live="polite"></div>
+{% if order and razorpay_configured %}<p class="small muted">Razorpay order {{ order.id }}</p>{% endif %}
+<form id="order-form" method="post" {% if order or not payment_allowed %}hidden{% endif %}>{% csrf_token %}<button id="continue-button" class="btn btn-primary btn-lg w-100" type="submit"><span id="continue-label">Continue to payment</span><span id="continue-spinner" class="spinner-border spinner-border-sm ms-2 d-none" aria-hidden="true"></span></button></form>
+<button id="pay-button" class="btn btn-primary btn-lg w-100 {% if not order or not razorpay_configured %}d-none{% endif %}" type="button" data-key-id="{{ order.key_id }}" data-order-id="{{ order.id }}" data-amount="{{ order.amount }}" data-currency="{{ order.currency|default:'INR' }}"><span id="pay-label">Pay securely <i class="fa-solid fa-lock ms-2"></i></span><span id="pay-spinner" class="spinner-border spinner-border-sm ms-2 d-none" aria-hidden="true"></span></button>
+<button id="reconcile-button" class="btn btn-outline-primary w-100 mt-2 {% if not order or not razorpay_configured %}d-none{% endif %}" type="button">I completed payment — check status</button>
+<button id="verify-retry-button" class="btn btn-outline-primary w-100 mt-2 d-none" type="button">Retry payment verification</button>
+<form id="verify-form" method="post" action="{% url 'dashboard:payment_verify' %}" hidden>{% csrf_token %}<input type="hidden" name="booking_id" value="{{ reservation.booking_id }}"><input type="hidden" name="razorpay_payment_id"><input type="hidden" name="razorpay_order_id" value="{{ order.id }}"><input type="hidden" name="razorpay_signature"></form>
+<form id="failure-form" method="post" action="{% url 'dashboard:payment_failure' %}" hidden>{% csrf_token %}<input type="hidden" name="booking_id" value="{{ reservation.booking_id }}"><input type="hidden" name="razorpay_order_id" value="{{ order.id }}"><input type="hidden" name="razorpay_payment_id"><input type="hidden" name="error_description"></form>
+<form id="reconcile-form" method="post" action="{% url 'dashboard:payment_reconcile' %}" hidden>{% csrf_token %}<input type="hidden" name="razorpay_order_id" value="{{ order.id }}"></form>
+<p class="small muted text-center mt-3 mb-0">Payments are processed securely in Razorpay {% if razorpay_test_mode %}test mode{% else %}checkout{% endif %}.</p></div></section>{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const orderForm = document.getElementById("order-form");
+  const continueButton = document.getElementById("continue-button");
+  const continueLabel = document.getElementById("continue-label");
+  const continueSpinner = document.getElementById("continue-spinner");
+  const payButton = document.getElementById("pay-button");
+  const paySpinner = document.getElementById("pay-spinner");
+  const verifyForm = document.getElementById("verify-form");
+  const failureForm = document.getElementById("failure-form");
+  const retryVerifyButton = document.getElementById("verify-retry-button");
+  const reconcileButton = document.getElementById("reconcile-button");
+  const reconcileForm = document.getElementById("reconcile-form");
+  const message = document.getElementById("payment-message");
+  const paymentCard = document.querySelector(".auth-card");
+  const autoCheckout = new URLSearchParams(window.location.search).get("checkout") === "1";
+  if (autoCheckout) window.history.replaceState(null, "", window.location.pathname);
+  let busy = false;
+  let lastSuccessfulResponse = null;
+  let checkoutScriptPromise = null;
+
+  function showMessage(text, kind) {
+    message.textContent = text;
+    message.className = `alert alert-${kind} mt-3`;
+  }
+
+  function setOrder(order) {
+    payButton.dataset.keyId = order.key_id;
+    payButton.dataset.orderId = order.id;
+    payButton.dataset.amount = order.amount;
+    payButton.dataset.currency = order.currency;
+    verifyForm.elements.razorpay_order_id.value = order.id;
+    failureForm.elements.razorpay_order_id.value = order.id;
+    reconcileForm.elements.razorpay_order_id.value = order.id;
+    payButton.classList.remove("d-none");
+    reconcileButton.classList.remove("d-none");
+  }
+
+  function offerNewAttempt() {
+    orderForm.hidden = false;
+    continueLabel.textContent = "Retry payment";
+    continueButton.disabled = false;
+    continueSpinner.classList.add("d-none");
+    payButton.classList.add("d-none");
+  }
+
+  function loadCheckout() {
+    if (window.Razorpay) return Promise.resolve();
+    if (checkoutScriptPromise) return checkoutScriptPromise;
+    checkoutScriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.async = true;
+      script.onload = () => {
+        if (window.Razorpay) resolve();
+        else {
+          checkoutScriptPromise = null;
+          reject(new Error("Razorpay Checkout did not initialize."));
+        }
+      };
+      script.onerror = () => {
+        script.remove();
+        checkoutScriptPromise = null;
+        reject(new Error("Could not load Razorpay Checkout. Check your internet connection and retry."));
+      };
+      document.head.appendChild(script);
+    });
+    return checkoutScriptPromise;
+  }
+
+  async function postForm(form, extraHeaders = {}) {
+    const response = await fetch(form.action, {
+      method: "POST",
+      body: new FormData(form),
+      credentials: "same-origin",
+      headers: {"X-Requested-With": "XMLHttpRequest", ...extraHeaders}
+    });
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error("The server returned an unexpected response. Please retry.");
+    }
+    if (!response.ok) throw new Error(data.error || data.detail || "The payment request could not be completed.");
+    return data;
+  }
+
+  async function verifyPayment(result) {
+    lastSuccessfulResponse = result;
+    verifyForm.elements.razorpay_order_id.value = result.razorpay_order_id;
+    verifyForm.elements.razorpay_payment_id.value = result.razorpay_payment_id;
+    verifyForm.elements.razorpay_signature.value = result.razorpay_signature;
+    retryVerifyButton.classList.add("d-none");
+    busy = true;
+    payButton.disabled = true;
+    paySpinner.classList.remove("d-none");
+    showMessage("Payment received. Verifying securely with SmartPark…", "info");
+    try {
+      const data = await postForm(verifyForm);
+      window.location.assign(data.redirect_url);
+    } catch (error) {
+      busy = false;
+      payButton.disabled = true;
+      paySpinner.classList.add("d-none");
+      showMessage(`${error.message} If you were charged, retry verification before starting another payment.`, "danger");
+      retryVerifyButton.classList.remove("d-none");
+    }
+  }
+
+  async function reportFailure(orderId, reason, paymentId) {
+    failureForm.elements.razorpay_order_id.value = orderId;
+    failureForm.elements.error_description.value = reason;
+    failureForm.elements.razorpay_payment_id.value = paymentId || "";
+    try {
+      const data = await postForm(failureForm);
+      if (data.attempt_failed) offerNewAttempt();
+    } catch {
+      showMessage(`${reason} We could not save the failure message because of a connection problem; your booking is still unpaid.`, "warning");
+    }
+  }
+
+  async function openCheckout(order) {
+    setOrder(order);
+    try {
+      await loadCheckout();
+      const checkout = new window.Razorpay({
+        key: order.key_id,
+        amount: order.amount,
+        currency: order.currency,
+        name: "SmartPark",
+        description: "Parking reservation",
+        order_id: order.id,
+        prefill: {
+          name: paymentCard.dataset.customerName,
+          email: paymentCard.dataset.customerEmail,
+          contact: paymentCard.dataset.customerPhone
+        },
+        handler: verifyPayment,
+        modal: {
+          ondismiss: () => {
+            busy = false;
+            payButton.disabled = false;
+            paySpinner.classList.add("d-none");
+            showMessage("Checkout was cancelled. Your booking is still pending; you can safely retry.", "info");
+          }
+        },
+        theme: {color: "#3978ff"}
+      });
+      checkout.on("payment.failed", response => {
+        const reason = response.error?.description || "Payment failed. Please retry checkout.";
+        const paymentId = response.error?.metadata?.payment_id || "";
+        busy = false;
+        payButton.disabled = false;
+        paySpinner.classList.add("d-none");
+        showMessage(reason, "danger");
+        reportFailure(order.id, reason, paymentId);
+      });
+      checkout.open();
+    } catch (error) {
+      busy = false;
+      payButton.disabled = false;
+      paySpinner.classList.add("d-none");
+      showMessage(error.message || "Could not open Razorpay Checkout. Please retry.", "danger");
+    }
+  }
+
+  if (orderForm) {
+    orderForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      if (busy) return;
+      busy = true;
+      continueButton.disabled = true;
+      continueLabel.textContent = "Creating secure order…";
+      continueSpinner.classList.remove("d-none");
+      showMessage("Connecting securely to Razorpay…", "info");
+      try {
+        const data = await postForm(orderForm);
+        orderForm.hidden = true;
+        showMessage("Your secure order is ready. Opening checkout…", "info");
+        await openCheckout(data.order);
+      } catch (error) {
+        busy = false;
+        continueButton.disabled = false;
+        continueLabel.textContent = "Continue to payment";
+        continueSpinner.classList.add("d-none");
+        showMessage(error.message || "Could not connect to the payment service. Please retry.", "danger");
+      }
+    });
+    if (autoCheckout && !orderForm.hidden) orderForm.requestSubmit();
+  }
+
+  if (payButton) {
+    payButton.addEventListener("click", async () => {
+      if (busy) return;
+      busy = true;
+      payButton.disabled = true;
+      paySpinner.classList.remove("d-none");
+      await openCheckout({
+        key_id: payButton.dataset.keyId,
+        id: payButton.dataset.orderId,
+        amount: Number(payButton.dataset.amount),
+        currency: payButton.dataset.currency || "INR"
+      });
+    });
+  }
+
+  if (reconcileButton) {
+    reconcileButton.addEventListener("click", async () => {
+      if (busy) return;
+      reconcileButton.disabled = true;
+      showMessage("Checking the payment status directly with Razorpay…", "info");
+      try {
+        const data = await postForm(reconcileForm);
+        if (data.redirect_url) {
+          window.location.assign(data.redirect_url);
+          return;
+        }
+        showMessage(data.message, data.status === "failed" ? "warning" : "info");
+        if (data.status === "failed") offerNewAttempt();
+      } catch (error) {
+        showMessage(error.message || "Could not refresh payment status. Please retry.", "danger");
+      } finally {
+        reconcileButton.disabled = false;
+      }
+    });
+  }
+
+  retryVerifyButton.addEventListener("click", () => {
+    if (lastSuccessfulResponse && !busy) verifyPayment(lastSuccessfulResponse);
+  });
+})();
+</script>
+{% endblock %}
